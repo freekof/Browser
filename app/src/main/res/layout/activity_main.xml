@@ -20,21 +20,6 @@
         android:padding="8dp"
         android:visibility="gone">
 
-        <Button
-            android:id="@+id/backButton"
-            style="@style/BrowserButton"
-            android:text="Back" />
-
-        <Button
-            android:id="@+id/forwardButton"
-            style="@style/BrowserButton"
-            android:text="Forward" />
-
-        <Button
-            android:id="@+id/refreshButton"
-            style="@style/BrowserButton"
-            android:text="Refresh" />
-
         <EditText
             android:id="@+id/addressBar"
             android:layout_width="0dp"
@@ -52,8 +37,23 @@
 
         <Button
             android:id="@+id/qrButton"
-            style="@style/BrowserButton"
+            style="@style/BrowserIconButton"
             android:text="QR" />
+
+        <Button
+            android:id="@+id/backButton"
+            style="@style/BrowserButton"
+            android:text="Back" />
+
+        <Button
+            android:id="@+id/forwardButton"
+            style="@style/BrowserButton"
+            android:text="Forward" />
+
+        <Button
+            android:id="@+id/refreshButton"
+            style="@style/BrowserButton"
+            android:text="Refresh" />
 
         <Button
             android:id="@+id/videoButton"

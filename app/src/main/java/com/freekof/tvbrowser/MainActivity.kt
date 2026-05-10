@@ -92,13 +92,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onBackPressed() {
-        when {
-            controlPanel.visibility != View.VISIBLE -> showControls()
-            webView.canGoBack() -> {
+        handleBackKey()
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+            handleBackKey()
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun handleBackKey() {
+        when (BackKeyPolicy.decide(controlPanel.visibility == View.VISIBLE, webView.canGoBack())) {
+            BackKeyAction.ShowControls -> showControls()
+            BackKeyAction.NavigateBack -> {
                 hideControls()
                 webView.goBack()
             }
-            else -> super.onBackPressed()
+            BackKeyAction.Exit -> super.onBackPressed()
         }
     }
 
@@ -110,7 +122,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showControls() {
         controlPanel.visibility = View.VISIBLE
-        controlPanel.requestFocus()
+        addressBar.requestFocus()
     }
 
     private fun hideControls() {
