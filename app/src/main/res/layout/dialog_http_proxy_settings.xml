@@ -61,5 +61,11 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="清除 Cookies" />
+
+        <Button
+            android:id="@+id/testProxyButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="测试 HTTP 代理" />
     </LinearLayout>
 </ScrollView>

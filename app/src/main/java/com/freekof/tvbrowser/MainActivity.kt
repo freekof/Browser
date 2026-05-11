@@ -17,6 +17,7 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.WebView.WebViewTransport
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -32,7 +33,11 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import java.net.InetSocketAddress
 import java.net.NetworkInterface
+import java.net.Proxy
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
@@ -66,6 +71,13 @@ class MainActivity : AppCompatActivity() {
                     TAG,
                     "JS ${consoleMessage.messageLevel()}: ${consoleMessage.message()} (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})",
                 )
+                return true
+            }
+
+            override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message): Boolean {
+                val transport = resultMsg.obj as WebViewTransport
+                transport.webView = webView
+                resultMsg.sendToTarget()
                 return true
             }
         }
@@ -284,6 +296,18 @@ class MainActivity : AppCompatActivity() {
         proxyDns.isChecked = settings.proxyDns
         userAgent.setText(UserAgentSettings.effective(settings.userAgent))
         view.findViewById<Button>(R.id.clearCookiesButton).setOnClickListener { clearCookies() }
+        view.findViewById<Button>(R.id.testProxyButton).setOnClickListener {
+            val candidate = HttpProxySettings(
+                enabled = enabled.isChecked,
+                host = host.text.toString().trim(),
+                port = port.text.toString().toIntOrNull() ?: 0,
+                username = username.text.toString(),
+                password = password.text.toString(),
+                proxyDns = proxyDns.isChecked,
+                userAgent = UserAgentSettings.effective(userAgent.text.toString()),
+            )
+            testHttpProxy(candidate)
+        }
 
         AlertDialog.Builder(this)
             .setTitle("代理和浏览设置")
@@ -317,6 +341,32 @@ class MainActivity : AppCompatActivity() {
             CookieManager.getInstance().flush()
             Toast.makeText(this, "Cookies 已清除", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun testHttpProxy(settings: HttpProxySettings) {
+        if (!settings.isUsable()) {
+            Toast.makeText(this, "HTTP 代理配置无效", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Thread {
+            val result = runCatching {
+                val client = OkHttpClient.Builder()
+                    .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress(settings.host, settings.port)))
+                    .build()
+                val request = Request.Builder().url("https://api.ipify.org").build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) error("HTTP ${response.code}")
+                    response.body?.string()?.trim().orEmpty()
+                }
+            }
+            runOnUiThread {
+                val message = result.fold(
+                    onSuccess = { "HTTP 代理可用，出口 IP: $it" },
+                    onFailure = { "HTTP 代理测试失败：${it.message ?: it.javaClass.simpleName}" },
+                )
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            }
+        }.start()
     }
 
     private fun findLanIpAddress(): String {
