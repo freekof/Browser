@@ -66,12 +66,6 @@
             android:id="@+id/testProxyButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="测试代理 (OkHttp)" />
-
-        <Button
-            android:id="@+id/verifyProxyButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="在浏览器中验证代理 IP" />
+            android:text="测试 HTTP 代理" />
     </LinearLayout>
 </ScrollView>
