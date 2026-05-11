@@ -65,6 +65,11 @@
             android:text="QR" />
 
         <Button
+            android:id="@+id/proxyButton"
+            style="@style/BrowserButton"
+            android:text="P" />
+
+        <Button
             android:id="@+id/exitButton"
             style="@style/BrowserButton"
             android:text="X" />

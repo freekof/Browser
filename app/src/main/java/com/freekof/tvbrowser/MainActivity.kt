@@ -17,6 +17,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -34,6 +35,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var addressBar: EditText
     private lateinit var refreshButton: Button
     private val videoSniffer = VideoSniffer()
+    private var lanInputServer: LanInputServer? = null
+    private lateinit var socks5Store: Socks5SettingsStore
     private var loading = false
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -46,6 +49,7 @@ class MainActivity : AppCompatActivity() {
         controlScrim = findViewById(R.id.controlScrim)
         addressBar = findViewById(R.id.addressBar)
         refreshButton = findViewById(R.id.refreshButton)
+        socks5Store = Socks5SettingsStore(this)
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
@@ -102,6 +106,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         findViewById<Button>(R.id.qrButton).setOnClickListener { showQrInputDialog() }
+        findViewById<Button>(R.id.proxyButton).setOnClickListener { showSocks5SettingsDialog() }
         findViewById<Button>(R.id.exitButton).setOnClickListener { finish() }
         controlScrim.setOnClickListener { hideControls() }
 
@@ -184,14 +189,65 @@ class MainActivity : AppCompatActivity() {
 
     private fun showQrInputDialog() {
         val content = LanInputEndpoint.qrContent(findLanIpAddress(), LAN_INPUT_PORT)
+        lanInputServer?.stop()
+        lanInputServer = LanInputServer(LAN_INPUT_PORT) { input ->
+            val url = UrlNormalizer.normalize(input)
+            addressBar.setText(url)
+            loading = true
+            updateRefreshButton()
+            webView.loadUrl(url)
+            hideControls()
+        }.also { it.start() }
+
         val view = LayoutInflater.from(this).inflate(R.layout.dialog_qr_input, null)
         view.findViewById<ImageView>(R.id.qrImage).setImageBitmap(createQrBitmap(content))
         view.findViewById<TextView>(R.id.qrAddress).text = content
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("LAN input")
             .setView(view)
             .setPositiveButton("确定", null)
+            .setNegativeButton("取消", null)
+            .create()
+        dialog.setOnDismissListener {
+            lanInputServer?.stop()
+            lanInputServer = null
+        }
+        dialog.show()
+    }
+
+    private fun showSocks5SettingsDialog() {
+        val settings = socks5Store.load()
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_socks5_settings, null)
+        val enabled = view.findViewById<CheckBox>(R.id.proxyEnabled)
+        val host = view.findViewById<EditText>(R.id.proxyHost)
+        val port = view.findViewById<EditText>(R.id.proxyPort)
+        val username = view.findViewById<EditText>(R.id.proxyUsername)
+        val password = view.findViewById<EditText>(R.id.proxyPassword)
+        val proxyDns = view.findViewById<CheckBox>(R.id.proxyDns)
+
+        enabled.isChecked = settings.enabled
+        host.setText(settings.host)
+        port.setText(settings.port.toString())
+        username.setText(settings.username)
+        password.setText(settings.password)
+        proxyDns.isChecked = settings.proxyDns
+
+        AlertDialog.Builder(this)
+            .setTitle("SOCKS5 代理")
+            .setView(view)
+            .setPositiveButton("保存") { _, _ ->
+                val saved = Socks5Settings(
+                    enabled = enabled.isChecked,
+                    host = host.text.toString().trim(),
+                    port = port.text.toString().toIntOrNull() ?: 0,
+                    username = username.text.toString(),
+                    password = password.text.toString(),
+                    proxyDns = proxyDns.isChecked,
+                )
+                socks5Store.save(saved)
+                Toast.makeText(this, if (saved.isUsable()) "代理设置已保存" else "代理已关闭或配置无效", Toast.LENGTH_SHORT).show()
+            }
             .setNegativeButton("取消", null)
             .show()
     }
