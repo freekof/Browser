@@ -9,12 +9,15 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -57,6 +60,15 @@ class MainActivity : AppCompatActivity() {
 
         configureWebView(startupSettings)
         WebViewProxyApplier.apply(this, startupSettings)
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
+                Log.d(
+                    TAG,
+                    "JS ${consoleMessage.messageLevel()}: ${consoleMessage.message()} (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})",
+                )
+                return true
+            }
+        }
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 addressBar.setText(request.url.toString())
@@ -65,8 +77,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest) =
                 super.shouldInterceptRequest(view, request).also {
-                    videoSniffer.record(request.url.toString())
-                    updateVideoButton()
+                    recordVideoRequest(request)
                 }
 
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
@@ -162,17 +173,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun configureWebView(settings: HttpProxySettings) {
         webView.settings.javaScriptEnabled = true
+        webView.settings.javaScriptCanOpenWindowsAutomatically = true
         webView.settings.domStorageEnabled = true
         webView.settings.databaseEnabled = true
         webView.settings.mediaPlaybackRequiresUserGesture = false
+        webView.settings.loadsImagesAutomatically = true
+        webView.settings.blockNetworkImage = false
+        webView.settings.blockNetworkLoads = false
         webView.settings.loadWithOverviewMode = true
         webView.settings.useWideViewPort = true
         webView.settings.builtInZoomControls = true
         webView.settings.displayZoomControls = false
         webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
+        webView.settings.setSupportMultipleWindows(true)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            webView.settings.safeBrowsingEnabled = false
         }
         CookieManager.getInstance().setAcceptCookie(true)
         webView.settings.userAgentString = UserAgentSettings.effective(settings.userAgent)
@@ -202,6 +221,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateVideoButton() {
         // Video list UI will move to a later compact control after the requested toolbar change.
+    }
+
+    private fun recordVideoRequest(request: WebResourceRequest) {
+        val url = request.url.toString()
+        val lowerUrl = url.substringBefore('?').lowercase()
+        if (VIDEO_EXTENSIONS.any { lowerUrl.endsWith(".$it") }) {
+            videoSniffer.record(url)
+            updateVideoButton()
+        }
     }
 
     private fun updateRefreshButton() {
@@ -337,9 +365,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private companion object {
+        const val TAG = "TvBrowser"
         const val HOME_URL = "https://www.google.com"
         const val KODI_PACKAGE = "org.xbmc.kodi"
         const val LAN_INPUT_PORT = 8787
         const val QR_SIZE = 512
+        val VIDEO_EXTENSIONS = setOf("m3u8", "mp4", "webm", "mov", "flv", "ts", "m3u")
     }
 }
