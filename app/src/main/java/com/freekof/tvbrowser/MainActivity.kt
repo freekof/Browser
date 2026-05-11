@@ -17,17 +17,20 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
-import android.webkit.WebView.WebViewTransport
+import android.webkit.GeolocationPermissions
+import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.webkit.WebView.WebViewTransport
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -52,6 +55,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var proxyStore: HttpProxySettingsStore
     private var loading = false
 
+    // Full-screen video support
+    private var customView: View? = null
+    private var customViewCallback: WebChromeClient.CustomViewCallback? = null
+    private var fullscreenContainer: FrameLayout? = null
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,57 +70,13 @@ class MainActivity : AppCompatActivity() {
         controlScrim = findViewById(R.id.controlScrim)
         addressBar = findViewById(R.id.addressBar)
         refreshButton = findViewById(R.id.refreshButton)
+        fullscreenContainer = findViewById(android.R.id.content)
         proxyStore = HttpProxySettingsStore(this)
         val startupSettings = proxyStore.load()
 
         configureWebView(startupSettings)
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
-                Log.d(
-                    TAG,
-                    "JS ${consoleMessage.messageLevel()}: ${consoleMessage.message()} (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})",
-                )
-                return true
-            }
-
-            override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message): Boolean {
-                val transport = resultMsg.obj as WebViewTransport
-                transport.webView = webView
-                resultMsg.sendToTarget()
-                return true
-            }
-        }
-        webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                addressBar.setText(request.url.toString())
-                return false
-            }
-
-            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest) =
-                super.shouldInterceptRequest(view, request).also {
-                    recordVideoRequest(request)
-                }
-
-            override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-                loading = true
-                updateRefreshButton()
-                addressBar.setText(url)
-            }
-
-            override fun onPageFinished(view: WebView, url: String) {
-                loading = false
-                updateRefreshButton()
-                addressBar.setText(url)
-            }
-
-            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                Log.w(TAG, "Resource error ${error.errorCode}: ${error.description} ${request.url}")
-            }
-
-            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
-                Log.w(TAG, "HTTP error ${errorResponse.statusCode}: ${request.url}")
-            }
-        }
+        webView.webChromeClient = buildChromeClient()
+        webView.webViewClient = buildWebViewClient()
 
         webView.setOnGenericMotionListener { _, event ->
             if (event.buttonState and MotionEvent.BUTTON_SECONDARY != 0) {
@@ -158,15 +122,146 @@ class MainActivity : AppCompatActivity() {
         hideSystemUi()
         loading = true
         updateRefreshButton()
+        // loadUrl is called inside the callback so proxy is active before first request
         applyProxyThen(startupSettings) { webView.loadUrl(HOME_URL) }
     }
+
+    // ─── WebViewClient ────────────────────────────────────────────────────────
+
+    private fun buildWebViewClient() = object : WebViewClient() {
+        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+            addressBar.setText(request.url.toString())
+            return false
+        }
+
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest) =
+            super.shouldInterceptRequest(view, request).also {
+                recordVideoRequest(request)
+            }
+
+        override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+            loading = true
+            updateRefreshButton()
+            addressBar.setText(url)
+        }
+
+        override fun onPageFinished(view: WebView, url: String) {
+            loading = false
+            updateRefreshButton()
+            addressBar.setText(url)
+            // Persist cookies so sessions survive across page loads
+            CookieManager.getInstance().flush()
+        }
+
+        override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+            Log.w(TAG, "Resource error ${error.errorCode}: ${error.description} ${request.url}")
+        }
+
+        override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+            Log.w(TAG, "HTTP error ${errorResponse.statusCode}: ${request.url}")
+        }
+    }
+
+    // ─── WebChromeClient ──────────────────────────────────────────────────────
+
+    private fun buildChromeClient() = object : WebChromeClient() {
+
+        override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
+            Log.d(
+                TAG,
+                "JS ${consoleMessage.messageLevel()}: ${consoleMessage.message()} " +
+                    "(${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})",
+            )
+            return true
+        }
+
+        override fun onCreateWindow(
+            view: WebView,
+            isDialog: Boolean,
+            isUserGesture: Boolean,
+            resultMsg: android.os.Message,
+        ): Boolean {
+            val transport = resultMsg.obj as WebViewTransport
+            transport.webView = webView
+            resultMsg.sendToTarget()
+            return true
+        }
+
+        // ── Full-screen video (required for most video sites) ─────────────────
+
+        override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+            if (customView != null) {
+                // Already in fullscreen — dismiss old one first
+                onHideCustomView()
+            }
+            customView = view
+            customViewCallback = callback
+
+            // Hide the WebView and control panel while in fullscreen
+            webView.visibility = View.GONE
+            controlPanel.visibility = View.GONE
+            controlScrim.visibility = View.GONE
+
+            val decorView = window.decorView as FrameLayout
+            decorView.addView(
+                view,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            hideSystemUi()
+        }
+
+        override fun onHideCustomView() {
+            val view = customView ?: return
+            (window.decorView as FrameLayout).removeView(view)
+            customView = null
+            customViewCallback?.onCustomViewHidden()
+            customViewCallback = null
+
+            webView.visibility = View.VISIBLE
+            hideSystemUi()
+        }
+
+        // ── Media / permission requests (needed by video players) ─────────────
+
+        override fun onPermissionRequest(request: PermissionRequest) {
+            // Grant all WebRTC / media permissions the page requests.
+            // This is required for some embedded video players to initialise.
+            request.grant(request.resources)
+        }
+
+        override fun onGeolocationPermissionsShowPrompt(
+            origin: String,
+            callback: GeolocationPermissions.Callback,
+        ) {
+            // Auto-grant geolocation (some ad/video CDNs request it)
+            callback.invoke(origin, true, false)
+        }
+
+        // ── Progress ──────────────────────────────────────────────────────────
+
+        override fun onProgressChanged(view: WebView, newProgress: Int) {
+            super.onProgressChanged(view, newProgress)
+            // Log progress so it's easy to see in logcat
+            Log.d(TAG, "Page load progress: $newProgress%")
+        }
+    }
+
+    // ─── Back key ─────────────────────────────────────────────────────────────
 
     override fun onBackPressed() {
         handleBackKey()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // If a custom (fullscreen video) view is showing, back = exit fullscreen
         if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+            if (customView != null) {
+                (webView.webChromeClient as? WebChromeClient)?.onHideCustomView()
+                return true
+            }
             handleBackKey()
             return true
         }
@@ -184,38 +279,60 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ─── WebView configuration ────────────────────────────────────────────────
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun configureWebView(settings: HttpProxySettings) {
+        webView.settings.apply {
+            javaScriptEnabled = true
+            javaScriptCanOpenWindowsAutomatically = true
+            domStorageEnabled = true
+            databaseEnabled = true
+
+            // Allow video to auto-play without requiring a user gesture first
+            mediaPlaybackRequiresUserGesture = false
+
+            loadsImagesAutomatically = true
+            blockNetworkImage = false
+            blockNetworkLoads = false
+            loadWithOverviewMode = true
+            useWideViewPort = true
+            builtInZoomControls = true
+            displayZoomControls = false
+            cacheMode = WebSettings.LOAD_DEFAULT
+            setSupportMultipleWindows(true)
+
+            // Allow HTTP resources inside HTTPS pages (common on video sites)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                safeBrowsingEnabled = false
+            }
+
+            // Desktop Chrome UA — njavtv.com and similar sites return a broken
+            // or empty player when they detect an Android/TV user-agent.
+            userAgentString = UserAgentSettings.effective(settings.userAgent)
+        }
+
+        // Accept all cookies, including third-party CDN cookies used by video players
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                setAcceptThirdPartyCookies(webView, true)
+            }
+        }
+    }
+
+    // ─── Controls UI ──────────────────────────────────────────────────────────
+
     private fun loadFromAddressBar() {
         val url = UrlNormalizer.normalize(addressBar.text.toString())
         loading = true
         updateRefreshButton()
         webView.loadUrl(url)
         hideControls()
-    }
-
-    private fun configureWebView(settings: HttpProxySettings) {
-        webView.settings.javaScriptEnabled = true
-        webView.settings.javaScriptCanOpenWindowsAutomatically = true
-        webView.settings.domStorageEnabled = true
-        webView.settings.databaseEnabled = true
-        webView.settings.mediaPlaybackRequiresUserGesture = false
-        webView.settings.loadsImagesAutomatically = true
-        webView.settings.blockNetworkImage = false
-        webView.settings.blockNetworkLoads = false
-        webView.settings.loadWithOverviewMode = true
-        webView.settings.useWideViewPort = true
-        webView.settings.builtInZoomControls = true
-        webView.settings.displayZoomControls = false
-        webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
-        webView.settings.setSupportMultipleWindows(true)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            webView.settings.safeBrowsingEnabled = false
-        }
-        CookieManager.getInstance().setAcceptCookie(true)
-        webView.settings.userAgentString = UserAgentSettings.effective(settings.userAgent)
     }
 
     private fun showControls() {
@@ -240,51 +357,47 @@ class MainActivity : AppCompatActivity() {
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
     }
 
-    private fun updateVideoButton() {
-        // Video list UI will move to a later compact control after the requested toolbar change.
+    private fun updateRefreshButton() {
+        refreshButton.text = if (loading) "S" else "R"
     }
+
+    // ─── Proxy ────────────────────────────────────────────────────────────────
+
+    private fun applyProxyThen(settings: HttpProxySettings, next: () -> Unit) {
+        val supported = WebViewProxyApplier.apply(this, settings) { applied ->
+            val message = when {
+                settings.isUsable() && applied -> "HTTP 代理已应用 ✓"
+                settings.isUsable() && !applied -> "⚠ HTTP 代理应用失败，WebView 版本不支持，将直连"
+                applied -> "HTTP 代理已关闭"
+                else -> "代理关闭失败（WebView 不支持代理接口）"
+            }
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+            next()
+        }
+        if (!supported) {
+            // WebViewFeature.PROXY_OVERRIDE not available — warn and continue
+            if (settings.isUsable()) {
+                Toast.makeText(
+                    this,
+                    "⚠ 此设备 WebView 版本不支持代理，请升级 Android System WebView",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+            next()
+        }
+    }
+
+    // ─── Video recording ──────────────────────────────────────────────────────
 
     private fun recordVideoRequest(request: WebResourceRequest) {
         val url = request.url.toString()
         val lowerUrl = url.substringBefore('?').lowercase()
         if (VIDEO_EXTENSIONS.any { lowerUrl.endsWith(".$it") }) {
             videoSniffer.record(url)
-            updateVideoButton()
         }
     }
 
-    private fun updateRefreshButton() {
-        refreshButton.text = if (loading) "S" else "R"
-    }
-
-    private fun showQrInputDialog() {
-        val content = LanInputEndpoint.qrContent(findLanIpAddress(), LAN_INPUT_PORT)
-        lanInputServer?.stop()
-        lanInputServer = LanInputServer(LAN_INPUT_PORT) { input ->
-            val url = UrlNormalizer.normalize(input)
-            addressBar.setText(url)
-            loading = true
-            updateRefreshButton()
-            webView.loadUrl(url)
-            hideControls()
-        }.also { it.start() }
-
-        val view = LayoutInflater.from(this).inflate(R.layout.dialog_qr_input, null)
-        view.findViewById<ImageView>(R.id.qrImage).setImageBitmap(createQrBitmap(content))
-        view.findViewById<TextView>(R.id.qrAddress).text = content
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("LAN input")
-            .setView(view)
-            .setPositiveButton("确定", null)
-            .setNegativeButton("取消", null)
-            .create()
-        dialog.setOnDismissListener {
-            lanInputServer?.stop()
-            lanInputServer = null
-        }
-        dialog.show()
-    }
+    // ─── Proxy settings dialog ────────────────────────────────────────────────
 
     private fun showProxySettingsDialog() {
         val settings = proxyStore.load()
@@ -304,17 +417,11 @@ class MainActivity : AppCompatActivity() {
         password.setText(settings.password)
         proxyDns.isChecked = settings.proxyDns
         userAgent.setText(UserAgentSettings.effective(settings.userAgent))
+
         view.findViewById<Button>(R.id.clearCookiesButton).setOnClickListener { clearCookies() }
+        view.findViewById<Button>(R.id.verifyProxyButton).setOnClickListener { verifyProxyInWebView() }
         view.findViewById<Button>(R.id.testProxyButton).setOnClickListener {
-            val candidate = HttpProxySettings(
-                enabled = enabled.isChecked,
-                host = host.text.toString().trim(),
-                port = port.text.toString().toIntOrNull() ?: 0,
-                username = username.text.toString(),
-                password = password.text.toString(),
-                proxyDns = proxyDns.isChecked,
-                userAgent = UserAgentSettings.effective(userAgent.text.toString()),
-            )
+            val candidate = buildSettingsFromDialog(enabled, host, port, username, password, proxyDns, userAgent)
             testHttpProxy(candidate)
         }
 
@@ -322,25 +429,39 @@ class MainActivity : AppCompatActivity() {
             .setTitle("代理和浏览设置")
             .setView(view)
             .setPositiveButton("保存") { _, _ ->
-                val saved = HttpProxySettings(
-                    enabled = enabled.isChecked,
-                    host = host.text.toString().trim(),
-                    port = port.text.toString().toIntOrNull() ?: 0,
-                    username = username.text.toString(),
-                    password = password.text.toString(),
-                    proxyDns = proxyDns.isChecked,
-                    userAgent = UserAgentSettings.effective(userAgent.text.toString()),
-                )
+                val saved = buildSettingsFromDialog(enabled, host, port, username, password, proxyDns, userAgent)
                 proxyStore.save(saved)
                 webView.settings.userAgentString = UserAgentSettings.effective(saved.userAgent)
                 applyProxyThen(saved) {
+                    // Clear cache so new requests use fresh connections through the proxy.
+                    // Do NOT call reload() before applyProxyThen's callback fires —
+                    // setProxyOverride is async and the proxy won't be active yet.
                     webView.stopLoading()
+                    webView.clearCache(false)
                     webView.reload()
                 }
             }
             .setNegativeButton("取消", null)
             .show()
     }
+
+    private fun buildSettingsFromDialog(
+        enabled: CheckBox,
+        host: EditText,
+        port: EditText,
+        username: EditText,
+        password: EditText,
+        proxyDns: CheckBox,
+        userAgent: EditText,
+    ) = HttpProxySettings(
+        enabled = enabled.isChecked,
+        host = host.text.toString().trim(),
+        port = port.text.toString().toIntOrNull() ?: 0,
+        username = username.text.toString(),
+        password = password.text.toString(),
+        proxyDns = proxyDns.isChecked,
+        userAgent = UserAgentSettings.effective(userAgent.text.toString()),
+    )
 
     private fun clearCookies() {
         CookieManager.getInstance().removeAllCookies {
@@ -349,20 +470,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun applyProxyThen(settings: HttpProxySettings, next: () -> Unit) {
-        val supported = WebViewProxyApplier.apply(this, settings) { applied ->
-            val message = when {
-                settings.isUsable() && applied -> "HTTP 代理已应用"
-                settings.isUsable() -> "HTTP 代理应用失败，WebView 将直连"
-                applied -> "HTTP 代理已关闭"
-                else -> "代理关闭失败或 WebView 不支持代理接口"
-            }
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-            next()
-        }
-        if (!supported) {
-            next()
-        }
+    /**
+     * Verifies the proxy is active FROM THE WEBVIEW's perspective by navigating
+     * to an IP-echo page directly in the WebView. This is the ground truth —
+     * if this shows the proxy IP, WebView traffic is going through the proxy.
+     */
+    private fun verifyProxyInWebView() {
+        hideControls()
+        webView.loadUrl("https://api.ipify.org")
     }
 
     private fun testHttpProxy(settings: HttpProxySettings) {
@@ -372,8 +487,9 @@ class MainActivity : AppCompatActivity() {
         }
         Thread {
             val result = runCatching {
+                val proxyAddress = InetSocketAddress(settings.host, settings.port)
                 val client = OkHttpClient.Builder()
-                    .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress(settings.host, settings.port)))
+                    .proxy(Proxy(Proxy.Type.HTTP, proxyAddress))
                     .build()
                 val request = Request.Builder().url("https://api.ipify.org").build()
                 client.newCall(request).execute().use { response ->
@@ -391,24 +507,40 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun findLanIpAddress(): String {
-        return NetworkInterface.getNetworkInterfaces().toList()
-            .flatMap { it.inetAddresses.toList() }
-            .firstOrNull { !it.isLoopbackAddress && it.hostAddress?.contains(':') == false }
-            ?.hostAddress ?: "0.0.0.0"
-    }
+    // ─── QR / LAN input ──────────────────────────────────────────────────────
 
-    private fun createQrBitmap(content: String): Bitmap {
-        val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, QR_SIZE, QR_SIZE)
-        val bitmap = Bitmap.createBitmap(QR_SIZE, QR_SIZE, Bitmap.Config.ARGB_8888)
-        for (x in 0 until QR_SIZE) {
-            for (y in 0 until QR_SIZE) {
-                bitmap.setPixel(x, y, if (matrix[x, y]) Color.BLACK else Color.WHITE)
-            }
+    private fun showQrInputDialog() {
+        val content = LanInputEndpoint.qrContent(findLanIpAddress(), LAN_INPUT_PORT)
+        lanInputServer?.stop()
+        lanInputServer = LanInputServer(LAN_INPUT_PORT) { input ->
+            val url = UrlNormalizer.normalize(input)
+            addressBar.setText(url)
+            loading = true
+            updateRefreshButton()
+            webView.loadUrl(url)
+            hideControls()
+        }.also { it.start() }
+
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_qr_input, null)
+        dialogView.findViewById<ImageView>(R.id.qrImage).setImageBitmap(createQrBitmap(content))
+        dialogView.findViewById<TextView>(R.id.qrAddress).text = content
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("LAN input")
+            .setView(dialogView)
+            .setPositiveButton("确定", null)
+            .setNegativeButton("取消", null)
+            .create()
+        dialog.setOnDismissListener {
+            lanInputServer?.stop()
+            lanInputServer = null
         }
-        return bitmap
+        dialog.show()
     }
 
+    // ─── Video list / KODI ───────────────────────────────────────────────────
+
+    @Suppress("unused") // Called from control panel when video button is added
     private fun showVideoList() {
         val items = videoSniffer.items
         if (items.isEmpty()) {
@@ -425,7 +557,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun openInKodi(item: VideoItem) {
         val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(Uri.parse(item.url), if (item.type == "m3u8") "application/vnd.apple.mpegurl" else "video/*")
+            setDataAndType(
+                Uri.parse(item.url),
+                if (item.type == "m3u8") "application/vnd.apple.mpegurl" else "video/*",
+            )
             setPackage(KODI_PACKAGE)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -434,6 +569,26 @@ class MainActivity : AppCompatActivity() {
         } catch (_: ActivityNotFoundException) {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(item.url)))
         }
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private fun findLanIpAddress(): String {
+        return NetworkInterface.getNetworkInterfaces().toList()
+            .flatMap { it.inetAddresses.toList() }
+            .firstOrNull { !it.isLoopbackAddress && it.hostAddress?.contains(':') == false }
+            ?.hostAddress ?: "0.0.0.0"
+    }
+
+    private fun createQrBitmap(content: String): Bitmap {
+        val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, QR_SIZE, QR_SIZE)
+        val bitmap = Bitmap.createBitmap(QR_SIZE, QR_SIZE, Bitmap.Config.ARGB_8888)
+        for (x in 0 until QR_SIZE) {
+            for (y in 0 until QR_SIZE) {
+                bitmap.setPixel(x, y, if (matrix[x, y]) Color.BLACK else Color.WHITE)
+            }
+        }
+        return bitmap
     }
 
     private companion object {
