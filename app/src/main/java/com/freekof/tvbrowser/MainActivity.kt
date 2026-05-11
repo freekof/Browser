@@ -50,10 +50,12 @@ class MainActivity : AppCompatActivity() {
         addressBar = findViewById(R.id.addressBar)
         refreshButton = findViewById(R.id.refreshButton)
         socks5Store = Socks5SettingsStore(this)
+        val startupSettings = socks5Store.load()
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
-        webView.settings.userAgentString = DEFAULT_USER_AGENT
+        webView.settings.userAgentString = UserAgentSettings.effective(startupSettings.userAgent)
+        WebViewProxyApplier.apply(this, startupSettings)
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 addressBar.setText(request.url.toString())
@@ -225,6 +227,7 @@ class MainActivity : AppCompatActivity() {
         val username = view.findViewById<EditText>(R.id.proxyUsername)
         val password = view.findViewById<EditText>(R.id.proxyPassword)
         val proxyDns = view.findViewById<CheckBox>(R.id.proxyDns)
+        val userAgent = view.findViewById<EditText>(R.id.userAgent)
 
         enabled.isChecked = settings.enabled
         host.setText(settings.host)
@@ -232,6 +235,7 @@ class MainActivity : AppCompatActivity() {
         username.setText(settings.username)
         password.setText(settings.password)
         proxyDns.isChecked = settings.proxyDns
+        userAgent.setText(UserAgentSettings.effective(settings.userAgent))
 
         AlertDialog.Builder(this)
             .setTitle("SOCKS5 代理")
@@ -244,9 +248,17 @@ class MainActivity : AppCompatActivity() {
                     username = username.text.toString(),
                     password = password.text.toString(),
                     proxyDns = proxyDns.isChecked,
+                    userAgent = UserAgentSettings.effective(userAgent.text.toString()),
                 )
                 socks5Store.save(saved)
-                Toast.makeText(this, if (saved.isUsable()) "代理设置已保存" else "代理已关闭或配置无效", Toast.LENGTH_SHORT).show()
+                webView.settings.userAgentString = UserAgentSettings.effective(saved.userAgent)
+                val proxyApplied = WebViewProxyApplier.apply(this, saved)
+                val message = when {
+                    saved.isUsable() && proxyApplied -> "代理和 UA 已应用"
+                    saved.isUsable() -> "代理保存成功，但当前 WebView 不支持直接应用"
+                    else -> "代理已关闭，UA 已应用"
+                }
+                Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("取消", null)
             .show()
@@ -302,7 +314,5 @@ class MainActivity : AppCompatActivity() {
         const val KODI_PACKAGE = "org.xbmc.kodi"
         const val LAN_INPUT_PORT = 8787
         const val QR_SIZE = 512
-        const val DEFAULT_USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 15; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
     }
 }

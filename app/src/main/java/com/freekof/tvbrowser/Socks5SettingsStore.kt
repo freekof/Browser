@@ -12,6 +12,7 @@ class Socks5SettingsStore(context: Context) {
         username = preferences.getString("username", "").orEmpty(),
         password = preferences.getString("password", "").orEmpty(),
         proxyDns = preferences.getBoolean("proxyDns", true),
+        userAgent = UserAgentSettings.effective(preferences.getString("userAgent", UserAgentSettings.DEFAULT).orEmpty()),
     )
 
     fun save(settings: Socks5Settings) {
@@ -22,6 +23,7 @@ class Socks5SettingsStore(context: Context) {
             .putString("username", settings.username)
             .putString("password", settings.password)
             .putBoolean("proxyDns", settings.proxyDns)
+            .putString("userAgent", UserAgentSettings.effective(settings.userAgent))
             .apply()
     }
 }

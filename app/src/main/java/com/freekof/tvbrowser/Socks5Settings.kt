@@ -7,6 +7,7 @@ data class Socks5Settings(
     val username: String = "",
     val password: String = "",
     val proxyDns: Boolean = true,
+    val userAgent: String = UserAgentSettings.DEFAULT,
 ) {
     fun isUsable(): Boolean = enabled && host.isNotBlank() && port in 1..65535
 }
