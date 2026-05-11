@@ -7,13 +7,16 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -21,6 +24,7 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RadioButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -52,9 +56,7 @@ class MainActivity : AppCompatActivity() {
         socks5Store = Socks5SettingsStore(this)
         val startupSettings = socks5Store.load()
 
-        webView.settings.javaScriptEnabled = true
-        webView.settings.domStorageEnabled = true
-        webView.settings.userAgentString = UserAgentSettings.effective(startupSettings.userAgent)
+        configureWebView(startupSettings)
         WebViewProxyApplier.apply(this, startupSettings)
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -159,6 +161,24 @@ class MainActivity : AppCompatActivity() {
         hideControls()
     }
 
+    private fun configureWebView(settings: Socks5Settings) {
+        webView.settings.javaScriptEnabled = true
+        webView.settings.domStorageEnabled = true
+        webView.settings.databaseEnabled = true
+        webView.settings.mediaPlaybackRequiresUserGesture = false
+        webView.settings.loadWithOverviewMode = true
+        webView.settings.useWideViewPort = true
+        webView.settings.builtInZoomControls = true
+        webView.settings.displayZoomControls = false
+        webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+        }
+        CookieManager.getInstance().setAcceptCookie(true)
+        webView.settings.userAgentString = UserAgentSettings.effective(settings.userAgent)
+    }
+
     private fun showControls() {
         controlScrim.visibility = View.VISIBLE
         controlPanel.visibility = View.VISIBLE
@@ -222,6 +242,8 @@ class MainActivity : AppCompatActivity() {
         val settings = socks5Store.load()
         val view = LayoutInflater.from(this).inflate(R.layout.dialog_socks5_settings, null)
         val enabled = view.findViewById<CheckBox>(R.id.proxyEnabled)
+        val proxyTypeSocks5 = view.findViewById<RadioButton>(R.id.proxyTypeSocks5)
+        val proxyTypeHttp = view.findViewById<RadioButton>(R.id.proxyTypeHttp)
         val host = view.findViewById<EditText>(R.id.proxyHost)
         val port = view.findViewById<EditText>(R.id.proxyPort)
         val username = view.findViewById<EditText>(R.id.proxyUsername)
@@ -230,19 +252,23 @@ class MainActivity : AppCompatActivity() {
         val userAgent = view.findViewById<EditText>(R.id.userAgent)
 
         enabled.isChecked = settings.enabled
+        proxyTypeSocks5.isChecked = settings.proxyType == ProxyType.Socks5
+        proxyTypeHttp.isChecked = settings.proxyType == ProxyType.Http
         host.setText(settings.host)
         port.setText(settings.port.toString())
         username.setText(settings.username)
         password.setText(settings.password)
         proxyDns.isChecked = settings.proxyDns
         userAgent.setText(UserAgentSettings.effective(settings.userAgent))
+        view.findViewById<Button>(R.id.clearCookiesButton).setOnClickListener { clearCookies() }
 
         AlertDialog.Builder(this)
-            .setTitle("SOCKS5 代理")
+            .setTitle("代理和浏览设置")
             .setView(view)
             .setPositiveButton("保存") { _, _ ->
                 val saved = Socks5Settings(
                     enabled = enabled.isChecked,
+                    proxyType = if (proxyTypeHttp.isChecked) ProxyType.Http else ProxyType.Socks5,
                     host = host.text.toString().trim(),
                     port = port.text.toString().toIntOrNull() ?: 0,
                     username = username.text.toString(),
@@ -262,6 +288,13 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    private fun clearCookies() {
+        CookieManager.getInstance().removeAllCookies {
+            CookieManager.getInstance().flush()
+            Toast.makeText(this, "Cookies 已清除", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun findLanIpAddress(): String {

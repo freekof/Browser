@@ -14,6 +14,25 @@
             android:layout_height="wrap_content"
             android:text="启用 SOCKS5 代理" />
 
+        <RadioGroup
+            android:id="@+id/proxyType"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/proxyTypeSocks5"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="SOCKS5" />
+
+            <RadioButton
+                android:id="@+id/proxyTypeHttp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="HTTP" />
+        </RadioGroup>
+
         <EditText
             android:id="@+id/proxyHost"
             android:layout_width="match_parent"
@@ -55,5 +74,11 @@
             android:hint="User-Agent"
             android:inputType="textMultiLine"
             android:minLines="2" />
+
+        <Button
+            android:id="@+id/clearCookiesButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="清除 Cookies" />
     </LinearLayout>
 </ScrollView>

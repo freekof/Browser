@@ -6,7 +6,7 @@ import android.os.Build
 object WebViewProxyApplier {
     fun apply(context: Context, settings: Socks5Settings): Boolean {
         return if (settings.isUsable()) {
-            applyProxy(context, "socks://${settings.host}:${settings.port}")
+            applyProxy(context, "${settings.proxyType.scheme}://${settings.host}:${settings.port}")
         } else {
             clearProxy(context)
         }

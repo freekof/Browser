@@ -15,4 +15,10 @@ class Socks5SettingsTest {
         assertThat(Socks5Settings(enabled = true, host = "", port = 1080).isUsable()).isFalse()
         assertThat(Socks5Settings(enabled = true, host = "127.0.0.1", port = 70000).isUsable()).isFalse()
     }
+
+    @Test
+    fun `proxy type exposes proxy url scheme`() {
+        assertThat(ProxyType.Socks5.scheme).isEqualTo("socks")
+        assertThat(ProxyType.Http.scheme).isEqualTo("http")
+    }
 }

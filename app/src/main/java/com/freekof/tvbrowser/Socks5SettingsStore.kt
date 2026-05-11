@@ -7,6 +7,8 @@ class Socks5SettingsStore(context: Context) {
 
     fun load(): Socks5Settings = Socks5Settings(
         enabled = preferences.getBoolean("enabled", false),
+        proxyType = runCatching { ProxyType.valueOf(preferences.getString("proxyType", ProxyType.Socks5.name).orEmpty()) }
+            .getOrDefault(ProxyType.Socks5),
         host = preferences.getString("host", "").orEmpty(),
         port = preferences.getInt("port", 1080),
         username = preferences.getString("username", "").orEmpty(),
@@ -18,6 +20,7 @@ class Socks5SettingsStore(context: Context) {
     fun save(settings: Socks5Settings) {
         preferences.edit()
             .putBoolean("enabled", settings.enabled)
+            .putString("proxyType", settings.proxyType.name)
             .putString("host", settings.host)
             .putInt("port", settings.port)
             .putString("username", settings.username)
