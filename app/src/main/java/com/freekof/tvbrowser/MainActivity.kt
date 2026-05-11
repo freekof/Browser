@@ -19,9 +19,7 @@ import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.WebView.WebViewTransport
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -66,6 +64,7 @@ class MainActivity : AppCompatActivity() {
         val startupSettings = proxyStore.load()
 
         configureWebView(startupSettings)
+        WebViewProxyApplier.apply(this, startupSettings)
         webView.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
                 Log.d(
@@ -103,14 +102,6 @@ class MainActivity : AppCompatActivity() {
                 loading = false
                 updateRefreshButton()
                 addressBar.setText(url)
-            }
-
-            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                Log.w(TAG, "Resource error ${error.errorCode}: ${error.description} ${request.url}")
-            }
-
-            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
-                Log.w(TAG, "HTTP error ${errorResponse.statusCode}: ${request.url}")
             }
         }
 
@@ -158,7 +149,7 @@ class MainActivity : AppCompatActivity() {
         hideSystemUi()
         loading = true
         updateRefreshButton()
-        applyProxyThen(startupSettings) { webView.loadUrl(HOME_URL) }
+        webView.loadUrl(HOME_URL)
     }
 
     override fun onBackPressed() {
@@ -333,10 +324,13 @@ class MainActivity : AppCompatActivity() {
                 )
                 proxyStore.save(saved)
                 webView.settings.userAgentString = UserAgentSettings.effective(saved.userAgent)
-                applyProxyThen(saved) {
-                    webView.stopLoading()
-                    webView.reload()
+                val proxyApplied = WebViewProxyApplier.apply(this, saved)
+                val message = when {
+                    saved.isUsable() && proxyApplied -> "代理和 UA 已应用"
+                    saved.isUsable() -> "代理保存成功，但当前 WebView 不支持直接应用"
+                    else -> "代理已关闭，UA 已应用"
                 }
+                Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("取消", null)
             .show()
@@ -346,22 +340,6 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().removeAllCookies {
             CookieManager.getInstance().flush()
             Toast.makeText(this, "Cookies 已清除", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun applyProxyThen(settings: HttpProxySettings, next: () -> Unit) {
-        val supported = WebViewProxyApplier.apply(this, settings) { applied ->
-            val message = when {
-                settings.isUsable() && applied -> "HTTP 代理已应用"
-                settings.isUsable() -> "HTTP 代理应用失败，WebView 将直连"
-                applied -> "HTTP 代理已关闭"
-                else -> "代理关闭失败或 WebView 不支持代理接口"
-            }
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-            next()
-        }
-        if (!supported) {
-            next()
         }
     }
 
