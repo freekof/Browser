@@ -12,26 +12,7 @@
             android:id="@+id/proxyEnabled"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="启用 SOCKS5 代理" />
-
-        <RadioGroup
-            android:id="@+id/proxyType"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <RadioButton
-                android:id="@+id/proxyTypeSocks5"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="SOCKS5" />
-
-            <RadioButton
-                android:id="@+id/proxyTypeHttp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="HTTP" />
-        </RadioGroup>
+            android:text="启用 HTTP 代理" />
 
         <EditText
             android:id="@+id/proxyHost"

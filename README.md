@@ -1,6 +1,6 @@
 # TvBrowser
 
-Android 9 TV WebView browser with fullscreen browsing, SOCKS5 proxy settings, LAN phone URL input, video URL sniffing, and KODI handoff.
+Android 9 TV WebView browser with fullscreen browsing, HTTP proxy settings, LAN phone URL input, video URL sniffing, and KODI handoff.
 
 ## Build
 

@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Build an Android 9 TV WebView browser with fullscreen browsing, hidden controls, SOCKS5 settings, temporary QR phone URL input, video sniffing, and KODI handoff.
+**Goal:** Build an Android 9 TV WebView browser with fullscreen browsing, hidden controls, HTTP proxy settings, temporary QR phone URL input, video sniffing, and KODI handoff.
 
 **Architecture:** The app uses one native Android activity with a fullscreen WebView and an overlay control panel. Pure Kotlin helpers handle URL normalization and video URL tracking so behavior can be unit tested without Android devices.
 
@@ -69,7 +69,7 @@
 ### Next Milestones
 
 1. Add temporary QR phone input service and QR dialog.
-2. Add settings screen for SOCKS5 and User-Agent.
+2. Add settings screen for HTTP proxy and User-Agent.
 3. Add tabs, bookmarks, downloads, and privacy mode.
 4. Improve video sniffing with injected JavaScript.
 5. Add release signing workflow when keystore is available.

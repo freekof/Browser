@@ -24,7 +24,6 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.RadioButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -40,7 +39,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var refreshButton: Button
     private val videoSniffer = VideoSniffer()
     private var lanInputServer: LanInputServer? = null
-    private lateinit var socks5Store: Socks5SettingsStore
+    private lateinit var proxyStore: HttpProxySettingsStore
     private var loading = false
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -53,8 +52,8 @@ class MainActivity : AppCompatActivity() {
         controlScrim = findViewById(R.id.controlScrim)
         addressBar = findViewById(R.id.addressBar)
         refreshButton = findViewById(R.id.refreshButton)
-        socks5Store = Socks5SettingsStore(this)
-        val startupSettings = socks5Store.load()
+        proxyStore = HttpProxySettingsStore(this)
+        val startupSettings = proxyStore.load()
 
         configureWebView(startupSettings)
         WebViewProxyApplier.apply(this, startupSettings)
@@ -110,7 +109,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         findViewById<Button>(R.id.qrButton).setOnClickListener { showQrInputDialog() }
-        findViewById<Button>(R.id.proxyButton).setOnClickListener { showSocks5SettingsDialog() }
+        findViewById<Button>(R.id.proxyButton).setOnClickListener { showProxySettingsDialog() }
         findViewById<Button>(R.id.exitButton).setOnClickListener { finish() }
         controlScrim.setOnClickListener { hideControls() }
 
@@ -161,7 +160,7 @@ class MainActivity : AppCompatActivity() {
         hideControls()
     }
 
-    private fun configureWebView(settings: Socks5Settings) {
+    private fun configureWebView(settings: HttpProxySettings) {
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
         webView.settings.databaseEnabled = true
@@ -238,12 +237,10 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun showSocks5SettingsDialog() {
-        val settings = socks5Store.load()
-        val view = LayoutInflater.from(this).inflate(R.layout.dialog_socks5_settings, null)
+    private fun showProxySettingsDialog() {
+        val settings = proxyStore.load()
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_http_proxy_settings, null)
         val enabled = view.findViewById<CheckBox>(R.id.proxyEnabled)
-        val proxyTypeSocks5 = view.findViewById<RadioButton>(R.id.proxyTypeSocks5)
-        val proxyTypeHttp = view.findViewById<RadioButton>(R.id.proxyTypeHttp)
         val host = view.findViewById<EditText>(R.id.proxyHost)
         val port = view.findViewById<EditText>(R.id.proxyPort)
         val username = view.findViewById<EditText>(R.id.proxyUsername)
@@ -252,8 +249,6 @@ class MainActivity : AppCompatActivity() {
         val userAgent = view.findViewById<EditText>(R.id.userAgent)
 
         enabled.isChecked = settings.enabled
-        proxyTypeSocks5.isChecked = settings.proxyType == ProxyType.Socks5
-        proxyTypeHttp.isChecked = settings.proxyType == ProxyType.Http
         host.setText(settings.host)
         port.setText(settings.port.toString())
         username.setText(settings.username)
@@ -266,9 +261,8 @@ class MainActivity : AppCompatActivity() {
             .setTitle("代理和浏览设置")
             .setView(view)
             .setPositiveButton("保存") { _, _ ->
-                val saved = Socks5Settings(
+                val saved = HttpProxySettings(
                     enabled = enabled.isChecked,
-                    proxyType = if (proxyTypeHttp.isChecked) ProxyType.Http else ProxyType.Socks5,
                     host = host.text.toString().trim(),
                     port = port.text.toString().toIntOrNull() ?: 0,
                     username = username.text.toString(),
@@ -276,7 +270,7 @@ class MainActivity : AppCompatActivity() {
                     proxyDns = proxyDns.isChecked,
                     userAgent = UserAgentSettings.effective(userAgent.text.toString()),
                 )
-                socks5Store.save(saved)
+                proxyStore.save(saved)
                 webView.settings.userAgentString = UserAgentSettings.effective(saved.userAgent)
                 val proxyApplied = WebViewProxyApplier.apply(this, saved)
                 val message = when {
