@@ -5,8 +5,8 @@ import org.junit.Test
 
 class UserAgentSettingsTest {
     @Test
-    fun `default user agent uses chrome 138`() {
-        assertThat(UserAgentSettings.DEFAULT).contains("Chrome/138.0.0.0")
+    fun `default user agent uses chrome 124`() {
+        assertThat(UserAgentSettings.DEFAULT).contains("Chrome/124.0.0.0")
     }
 
     @Test
