@@ -26,6 +26,7 @@ object WebViewProxyApplier {
                 .addBypassRule("localhost")
                 .build()
             ProxyController.getInstance().setProxyOverride(proxyConfig, context.mainExecutor) { onApplied(true) }
+            true
         }.getOrElse {
             onApplied(false)
             false
@@ -39,6 +40,7 @@ object WebViewProxyApplier {
         }
         return runCatching {
             ProxyController.getInstance().clearProxyOverride(context.mainExecutor) { onApplied(true) }
+            true
         }.getOrElse {
             onApplied(false)
             false
