@@ -4,9 +4,12 @@ import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.view.KeyEvent
+import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -15,16 +18,23 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
+import java.net.NetworkInterface
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var controlPanel: LinearLayout
+    private lateinit var controlScrim: View
     private lateinit var addressBar: EditText
-    private lateinit var videoButton: Button
+    private lateinit var refreshButton: Button
     private val videoSniffer = VideoSniffer()
+    private var loading = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,8 +43,9 @@ class MainActivity : AppCompatActivity() {
 
         webView = findViewById(R.id.webView)
         controlPanel = findViewById(R.id.controlPanel)
+        controlScrim = findViewById(R.id.controlScrim)
         addressBar = findViewById(R.id.addressBar)
-        videoButton = findViewById(R.id.videoButton)
+        refreshButton = findViewById(R.id.refreshButton)
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
@@ -51,7 +62,15 @@ class MainActivity : AppCompatActivity() {
                     updateVideoButton()
                 }
 
+            override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                loading = true
+                updateRefreshButton()
+                addressBar.setText(url)
+            }
+
             override fun onPageFinished(view: WebView, url: String) {
+                loading = false
+                updateRefreshButton()
                 addressBar.setText(url)
             }
         }
@@ -71,11 +90,20 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.forwardButton).setOnClickListener {
             if (webView.canGoForward()) webView.goForward()
         }
-        findViewById<Button>(R.id.refreshButton).setOnClickListener { webView.reload() }
-        findViewById<Button>(R.id.qrButton).setOnClickListener {
-            Toast.makeText(this, "QR phone input will be added next", Toast.LENGTH_SHORT).show()
+        refreshButton.setOnClickListener {
+            if (loading) {
+                webView.stopLoading()
+                loading = false
+                updateRefreshButton()
+            } else {
+                loading = true
+                updateRefreshButton()
+                webView.reload()
+            }
         }
-        videoButton.setOnClickListener { showVideoList() }
+        findViewById<Button>(R.id.qrButton).setOnClickListener { showQrInputDialog() }
+        findViewById<Button>(R.id.exitButton).setOnClickListener { finish() }
+        controlScrim.setOnClickListener { hideControls() }
 
         addressBar.setOnEditorActionListener { _, actionId, event ->
             val enterPressed = event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_UP
@@ -88,6 +116,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         hideSystemUi()
+        loading = true
+        updateRefreshButton()
         webView.loadUrl(HOME_URL)
     }
 
@@ -116,16 +146,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadFromAddressBar() {
         val url = UrlNormalizer.normalize(addressBar.text.toString())
+        loading = true
+        updateRefreshButton()
         webView.loadUrl(url)
         hideControls()
     }
 
     private fun showControls() {
+        controlScrim.visibility = View.VISIBLE
         controlPanel.visibility = View.VISIBLE
         addressBar.requestFocus()
     }
 
     private fun hideControls() {
+        controlScrim.visibility = View.GONE
         controlPanel.visibility = View.GONE
         hideSystemUi()
     }
@@ -141,7 +175,43 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateVideoButton() {
-        runOnUiThread { videoButton.text = "Video(${videoSniffer.items.size})" }
+        // Video list UI will move to a later compact control after the requested toolbar change.
+    }
+
+    private fun updateRefreshButton() {
+        refreshButton.text = if (loading) "S" else "R"
+    }
+
+    private fun showQrInputDialog() {
+        val content = LanInputEndpoint.qrContent(findLanIpAddress(), LAN_INPUT_PORT)
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_qr_input, null)
+        view.findViewById<ImageView>(R.id.qrImage).setImageBitmap(createQrBitmap(content))
+        view.findViewById<TextView>(R.id.qrAddress).text = content
+
+        AlertDialog.Builder(this)
+            .setTitle("LAN input")
+            .setView(view)
+            .setPositiveButton("确定", null)
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun findLanIpAddress(): String {
+        return NetworkInterface.getNetworkInterfaces().toList()
+            .flatMap { it.inetAddresses.toList() }
+            .firstOrNull { !it.isLoopbackAddress && it.hostAddress?.contains(':') == false }
+            ?.hostAddress ?: "0.0.0.0"
+    }
+
+    private fun createQrBitmap(content: String): Bitmap {
+        val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, QR_SIZE, QR_SIZE)
+        val bitmap = Bitmap.createBitmap(QR_SIZE, QR_SIZE, Bitmap.Config.ARGB_8888)
+        for (x in 0 until QR_SIZE) {
+            for (y in 0 until QR_SIZE) {
+                bitmap.setPixel(x, y, if (matrix[x, y]) Color.BLACK else Color.WHITE)
+            }
+        }
+        return bitmap
     }
 
     private fun showVideoList() {
@@ -174,6 +244,8 @@ class MainActivity : AppCompatActivity() {
     private companion object {
         const val HOME_URL = "https://www.google.com"
         const val KODI_PACKAGE = "org.xbmc.kodi"
+        const val LAN_INPUT_PORT = 8787
+        const val QR_SIZE = 512
         const val DEFAULT_USER_AGENT =
             "Mozilla/5.0 (Linux; Android 15; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
     }

@@ -8,23 +8,47 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <View
+        android:id="@+id/controlScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#00000000"
+        android:clickable="true"
+        android:focusable="false"
+        android:visibility="gone" />
+
     <LinearLayout
         android:id="@+id/controlPanel"
         android:layout_width="match_parent"
-        android:layout_height="72dp"
+        android:layout_height="46dp"
         android:layout_gravity="top"
-        android:layout_margin="12dp"
+        android:layout_margin="8dp"
         android:background="@drawable/control_panel_bg"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:padding="8dp"
+        android:padding="6dp"
         android:visibility="gone">
+
+        <Button
+            android:id="@+id/refreshButton"
+            style="@style/BrowserButton"
+            android:text="R" />
+
+        <Button
+            android:id="@+id/forwardButton"
+            style="@style/BrowserButton"
+            android:text="F" />
+
+        <Button
+            android:id="@+id/backButton"
+            style="@style/BrowserButton"
+            android:text="B" />
 
         <EditText
             android:id="@+id/addressBar"
             android:layout_width="0dp"
-            android:layout_height="48dp"
-            android:layout_marginHorizontal="8dp"
+            android:layout_height="30dp"
+            android:layout_marginHorizontal="6dp"
             android:layout_weight="1"
             android:background="#f2ffffff"
             android:hint="Enter URL"
@@ -41,23 +65,8 @@
             android:text="QR" />
 
         <Button
-            android:id="@+id/backButton"
+            android:id="@+id/exitButton"
             style="@style/BrowserButton"
-            android:text="Back" />
-
-        <Button
-            android:id="@+id/forwardButton"
-            style="@style/BrowserButton"
-            android:text="Forward" />
-
-        <Button
-            android:id="@+id/refreshButton"
-            style="@style/BrowserButton"
-            android:text="Refresh" />
-
-        <Button
-            android:id="@+id/videoButton"
-            style="@style/BrowserButton"
-            android:text="Video" />
+            android:text="X" />
     </LinearLayout>
 </FrameLayout>
