@@ -47,6 +47,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var refreshButton: Button
     private val videoSniffer = VideoSniffer()
     private var lanInputServer: LanInputServer? = null
+    private var localProxyServer: LocalHttpProxyServer? = null
     private lateinit var proxyStore: HttpProxySettingsStore
     private var loading = false
 
@@ -64,7 +65,7 @@ class MainActivity : AppCompatActivity() {
         val startupSettings = proxyStore.load()
 
         configureWebView(startupSettings)
-        WebViewProxyApplier.apply(this, startupSettings)
+        applyProxy(startupSettings)
         webView.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
                 Log.d(
@@ -324,7 +325,7 @@ class MainActivity : AppCompatActivity() {
                 )
                 proxyStore.save(saved)
                 webView.settings.userAgentString = UserAgentSettings.effective(saved.userAgent)
-                val proxyApplied = WebViewProxyApplier.apply(this, saved)
+                val proxyApplied = applyProxy(saved)
                 val message = when {
                     saved.isUsable() && proxyApplied -> "代理和 UA 已应用"
                     saved.isUsable() -> "代理保存成功，但当前 WebView 不支持直接应用"
@@ -334,6 +335,28 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    private fun applyProxy(settings: HttpProxySettings): Boolean {
+        localProxyServer?.stop()
+        localProxyServer = null
+
+        if (!settings.isUsable()) {
+            return WebViewProxyApplier.apply(this, settings)
+        }
+
+        val started = LocalHttpProxyServer(LOCAL_PROXY_PORT, settings).also {
+            localProxyServer = it
+        }.start()
+        if (!started) return false
+
+        val localProxySettings = settings.copy(
+            host = LOCAL_PROXY_HOST,
+            port = LOCAL_PROXY_PORT,
+            username = "",
+            password = "",
+        )
+        return WebViewProxyApplier.apply(this, localProxySettings)
     }
 
     private fun clearCookies() {
@@ -419,6 +442,8 @@ class MainActivity : AppCompatActivity() {
         const val HOME_URL = "https://www.google.com"
         const val KODI_PACKAGE = "org.xbmc.kodi"
         const val LAN_INPUT_PORT = 8787
+        const val LOCAL_PROXY_HOST = "127.0.0.1"
+        const val LOCAL_PROXY_PORT = 8899
         const val QR_SIZE = 512
         val VIDEO_EXTENSIONS = setOf("m3u8", "mp4", "webm", "mov", "flv", "ts", "m3u")
     }
