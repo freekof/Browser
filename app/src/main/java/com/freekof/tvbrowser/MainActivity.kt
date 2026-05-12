@@ -48,6 +48,7 @@ class MainActivity : AppCompatActivity() {
     private val videoSniffer = VideoSniffer()
     private var lanInputServer: LanInputServer? = null
     private var localProxyServer: LocalHttpProxyServer? = null
+    private val resourceProxyLoader = ResourceProxyLoader()
     private lateinit var proxyStore: HttpProxySettingsStore
     private var loading = false
 
@@ -88,10 +89,11 @@ class MainActivity : AppCompatActivity() {
                 return false
             }
 
-            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest) =
-                super.shouldInterceptRequest(view, request).also {
-                    recordVideoRequest(request)
-                }
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? {
+                recordVideoRequest(request)
+                return resourceProxyLoader.load(request, proxyStore.load())
+                    ?: super.shouldInterceptRequest(view, request)
+            }
 
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                 loading = true
