@@ -101,5 +101,5 @@ object WebViewProxyApplier {
                 val intent = android.content.Intent("android.intent.action.PROXY_CHANGE")
                 appContext.sendBroadcast(intent)
             } 
-        }
-    }
+        } }
+    
