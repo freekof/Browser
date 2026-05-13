@@ -102,3 +102,4 @@ object WebViewProxyApplier {
                 appContext.sendBroadcast(intent)
             } 
         }
+    }
