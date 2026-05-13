@@ -31,7 +31,7 @@ object WebViewProxyApplier {
                     .addBypassRule("127.0.0.1")
                     .addBypassRule("localhost")
                 ProxyController.getInstance()
-                    .setProxyOverride(builder.build(), directExecutor()) {}
+                    .setProxyOverride(builder.build(), Executor { it.run() }) {}
                 true
             }.getOrDefault(false)
             if (ok) return true
@@ -45,7 +45,7 @@ object WebViewProxyApplier {
         if (WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
             runCatching {
                 ProxyController.getInstance()
-                    .clearProxyOverride(directExecutor()) {}
+                    .clearProxyOverride(Executor { it.run() }) {}
             }
         }
         // 反射代理也一并清掉
@@ -100,4 +100,4 @@ object WebViewProxyApplier {
             runCatching {
                 val intent = android.content.Intent("android.intent.action.PROXY_CHANGE")
                 appContext.sendBroadcast(intent)
-            }
+            } }
