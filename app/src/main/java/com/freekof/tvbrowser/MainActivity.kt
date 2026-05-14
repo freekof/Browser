@@ -1,28 +1,17 @@
 package com.freekof.tvbrowser
 
-import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
-import android.webkit.ConsoleMessage
-import android.webkit.CookieManager
-import android.webkit.WebView.WebViewTransport
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -33,82 +22,72 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import java.io.File
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.Proxy
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.mozilla.geckoview.GeckoRuntime
+import org.mozilla.geckoview.GeckoRuntimeSettings
+import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoSessionSettings
+import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.StorageController
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var webView: WebView
+    private lateinit var geckoView: GeckoView
+    private lateinit var geckoRuntime: GeckoRuntime
+    private lateinit var geckoSession: GeckoSession
     private lateinit var controlPanel: LinearLayout
     private lateinit var controlScrim: View
     private lateinit var addressBar: EditText
     private lateinit var refreshButton: Button
+    private lateinit var proxyStore: HttpProxySettingsStore
     private val videoSniffer = VideoSniffer()
     private var lanInputServer: LanInputServer? = null
-    private var localProxyServer: LocalHttpProxyServer? = null
-    private val resourceProxyLoader = ResourceProxyLoader()
-    private lateinit var proxyStore: HttpProxySettingsStore
     private var loading = false
+    private var canGoBack = false
+    private var canGoForward = false
+    private var currentUrl = HOME_URL
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        webView = findViewById(R.id.webView)
+        geckoView = findViewById(R.id.geckoView)
         controlPanel = findViewById(R.id.controlPanel)
         controlScrim = findViewById(R.id.controlScrim)
         addressBar = findViewById(R.id.addressBar)
         refreshButton = findViewById(R.id.refreshButton)
         proxyStore = HttpProxySettingsStore(this)
-        val startupSettings = proxyStore.load()
 
-        configureWebView(startupSettings)
-        applyProxy(startupSettings)
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
-                Log.d(
-                    TAG,
-                    "JS ${consoleMessage.messageLevel()}: ${consoleMessage.message()} (${consoleMessage.sourceId()}:${consoleMessage.lineNumber()})",
-                )
-                return true
-            }
+        createGeckoSession(proxyStore.load(), HOME_URL)
+        setupControls()
+        hideSystemUi()
+        loadUrl(HOME_URL)
+    }
 
-            override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message): Boolean {
-                val transport = resultMsg.obj as WebViewTransport
-                transport.webView = webView
-                resultMsg.sendToTarget()
-                return true
-            }
+    override fun onDestroy() {
+        lanInputServer?.stop()
+        geckoSession.close()
+        super.onDestroy()
+    }
+
+    override fun onBackPressed() {
+        handleBackKey()
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+            handleBackKey()
+            return true
         }
-        webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                addressBar.setText(request.url.toString())
-                return false
-            }
+        return super.dispatchKeyEvent(event)
+    }
 
-            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? {
-                recordVideoRequest(request)
-                return resourceProxyLoader.load(request, proxyStore.load())
-                    ?: super.shouldInterceptRequest(view, request)
-            }
-
-            override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-                loading = true
-                updateRefreshButton()
-                addressBar.setText(url)
-            }
-
-            override fun onPageFinished(view: WebView, url: String) {
-                loading = false
-                updateRefreshButton()
-                addressBar.setText(url)
-            }
-        }
-
-        webView.setOnGenericMotionListener { _, event ->
+    private fun setupControls() {
+        geckoView.setOnGenericMotionListener { _, event ->
             if (event.buttonState and MotionEvent.BUTTON_SECONDARY != 0) {
                 showControls()
                 true
@@ -118,20 +97,20 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.backButton).setOnClickListener {
-            if (webView.canGoBack()) webView.goBack()
+            if (canGoBack) geckoSession.goBack()
         }
         findViewById<Button>(R.id.forwardButton).setOnClickListener {
-            if (webView.canGoForward()) webView.goForward()
+            if (canGoForward) geckoSession.goForward()
         }
         refreshButton.setOnClickListener {
             if (loading) {
-                webView.stopLoading()
+                geckoSession.stop()
                 loading = false
                 updateRefreshButton()
             } else {
                 loading = true
                 updateRefreshButton()
-                webView.reload()
+                geckoSession.reload()
             }
         }
         findViewById<Button>(R.id.qrButton).setOnClickListener { showQrInputDialog() }
@@ -148,68 +127,106 @@ class MainActivity : AppCompatActivity() {
                 false
             }
         }
-
-        hideSystemUi()
-        loading = true
-        updateRefreshButton()
-        webView.loadUrl(HOME_URL)
     }
 
-    override fun onBackPressed() {
-        handleBackKey()
+    private fun createGeckoSession(settings: HttpProxySettings, initialUrl: String) {
+        writeGeckoConfig(settings)
+        geckoRuntime = GeckoRuntime.create(
+            this,
+            GeckoRuntimeSettings.Builder()
+                .configFilePath(geckoConfigFile().absolutePath)
+                .javaScriptEnabled(true)
+                .consoleOutput(true)
+                .build(),
+        )
+        geckoSession = newSession(settings)
+        geckoSession.open(geckoRuntime)
+        geckoView.setSession(geckoSession)
+        currentUrl = initialUrl
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
-            handleBackKey()
-            return true
+    private fun recreateGeckoSession(settings: HttpProxySettings) {
+        val urlToRestore = currentUrl.takeIf { it.isNotBlank() } ?: HOME_URL
+        writeGeckoConfig(settings)
+        geckoSession.close()
+        geckoSession = newSession(settings)
+        geckoSession.open(geckoRuntime)
+        geckoView.setSession(geckoSession)
+        loadUrl(urlToRestore)
+    }
+
+    private fun newSession(settings: HttpProxySettings): GeckoSession {
+        return GeckoSession(
+            GeckoSessionSettings.Builder()
+                .allowJavascript(true)
+                .userAgentOverride(UserAgentSettings.effective(settings.userAgent))
+                .build(),
+        ).also { session ->
+            session.setProgressDelegate(object : GeckoSession.ProgressDelegate {
+                override fun onPageStart(session: GeckoSession, url: String) {
+                    loading = true
+                    currentUrl = url
+                    addressBar.setText(url)
+                    updateRefreshButton()
+                }
+
+                override fun onPageStop(session: GeckoSession, success: Boolean) {
+                    loading = false
+                    updateRefreshButton()
+                }
+            })
+            session.setNavigationDelegate(object : GeckoSession.NavigationDelegate {
+                override fun onLocationChange(
+                    session: GeckoSession,
+                    url: String?,
+                    perms: MutableList<GeckoSession.PermissionDelegate.ContentPermission>,
+                    hasUserGesture: Boolean,
+                ) {
+                    if (!url.isNullOrBlank()) {
+                        currentUrl = url
+                        addressBar.setText(url)
+                    }
+                }
+
+                override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) {
+                    this@MainActivity.canGoBack = canGoBack
+                }
+
+                override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) {
+                    this@MainActivity.canGoForward = canGoForward
+                }
+            })
         }
-        return super.dispatchKeyEvent(event)
     }
+
+    private fun writeGeckoConfig(settings: HttpProxySettings) {
+        geckoConfigFile().writeText(GeckoProxyConfig.yaml(settings), Charsets.UTF_8)
+    }
+
+    private fun geckoConfigFile(): File = File(filesDir, GECKO_CONFIG_FILE)
 
     private fun handleBackKey() {
-        when (BackKeyPolicy.decide(controlPanel.visibility == View.VISIBLE, webView.canGoBack())) {
+        when (BackKeyPolicy.decide(controlPanel.visibility == View.VISIBLE, canGoBack)) {
             BackKeyAction.ShowControls -> showControls()
             BackKeyAction.NavigateBack -> {
                 hideControls()
-                webView.goBack()
+                geckoSession.goBack()
             }
             BackKeyAction.Exit -> super.onBackPressed()
         }
     }
 
     private fun loadFromAddressBar() {
-        val url = UrlNormalizer.normalize(addressBar.text.toString())
-        loading = true
-        updateRefreshButton()
-        webView.loadUrl(url)
+        loadUrl(UrlNormalizer.normalize(addressBar.text.toString()))
         hideControls()
     }
 
-    private fun configureWebView(settings: HttpProxySettings) {
-        webView.settings.javaScriptEnabled = true
-        webView.settings.javaScriptCanOpenWindowsAutomatically = true
-        webView.settings.domStorageEnabled = true
-        webView.settings.databaseEnabled = true
-        webView.settings.mediaPlaybackRequiresUserGesture = false
-        webView.settings.loadsImagesAutomatically = true
-        webView.settings.blockNetworkImage = false
-        webView.settings.blockNetworkLoads = false
-        webView.settings.loadWithOverviewMode = true
-        webView.settings.useWideViewPort = true
-        webView.settings.builtInZoomControls = true
-        webView.settings.displayZoomControls = false
-        webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
-        webView.settings.setSupportMultipleWindows(true)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            webView.settings.safeBrowsingEnabled = false
-        }
-        CookieManager.getInstance().setAcceptCookie(true)
-        webView.settings.userAgentString = UserAgentSettings.effective(settings.userAgent)
+    private fun loadUrl(url: String) {
+        currentUrl = url
+        addressBar.setText(url)
+        loading = true
+        updateRefreshButton()
+        geckoSession.loadUri(url)
     }
 
     private fun showControls() {
@@ -235,16 +252,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateVideoButton() {
-        // Video list UI will move to a later compact control after the requested toolbar change.
-    }
-
-    private fun recordVideoRequest(request: WebResourceRequest) {
-        val url = request.url.toString()
-        val lowerUrl = url.substringBefore('?').lowercase()
-        if (VIDEO_EXTENSIONS.any { lowerUrl.endsWith(".$it") }) {
-            videoSniffer.record(url)
-            updateVideoButton()
-        }
+        // GeckoView request interception will be restored in a later video-sniffing pass.
     }
 
     private fun updateRefreshButton() {
@@ -255,11 +263,7 @@ class MainActivity : AppCompatActivity() {
         val content = LanInputEndpoint.qrContent(findLanIpAddress(), LAN_INPUT_PORT)
         lanInputServer?.stop()
         lanInputServer = LanInputServer(LAN_INPUT_PORT) { input ->
-            val url = UrlNormalizer.normalize(input)
-            addressBar.setText(url)
-            loading = true
-            updateRefreshButton()
-            webView.loadUrl(url)
+            loadUrl(UrlNormalizer.normalize(input))
             hideControls()
         }.also { it.start() }
 
@@ -300,72 +304,46 @@ class MainActivity : AppCompatActivity() {
         userAgent.setText(UserAgentSettings.effective(settings.userAgent))
         view.findViewById<Button>(R.id.clearCookiesButton).setOnClickListener { clearCookies() }
         view.findViewById<Button>(R.id.testProxyButton).setOnClickListener {
-            val candidate = HttpProxySettings(
-                enabled = enabled.isChecked,
-                host = host.text.toString().trim(),
-                port = port.text.toString().toIntOrNull() ?: 0,
-                username = username.text.toString(),
-                password = password.text.toString(),
-                proxyDns = proxyDns.isChecked,
-                userAgent = UserAgentSettings.effective(userAgent.text.toString()),
-            )
-            testHttpProxy(candidate)
+            testHttpProxy(dialogSettings(enabled, host, port, username, password, proxyDns, userAgent))
         }
 
         AlertDialog.Builder(this)
             .setTitle("代理和浏览设置")
             .setView(view)
             .setPositiveButton("保存") { _, _ ->
-                val saved = HttpProxySettings(
-                    enabled = enabled.isChecked,
-                    host = host.text.toString().trim(),
-                    port = port.text.toString().toIntOrNull() ?: 0,
-                    username = username.text.toString(),
-                    password = password.text.toString(),
-                    proxyDns = proxyDns.isChecked,
-                    userAgent = UserAgentSettings.effective(userAgent.text.toString()),
-                )
+                val saved = dialogSettings(enabled, host, port, username, password, proxyDns, userAgent)
                 proxyStore.save(saved)
-                webView.settings.userAgentString = UserAgentSettings.effective(saved.userAgent)
-                val proxyApplied = applyProxy(saved)
-                val message = when {
-                    saved.isUsable() && proxyApplied -> "代理和 UA 已应用"
-                    saved.isUsable() -> "代理保存成功，但当前 WebView 不支持直接应用"
-                    else -> "代理已关闭，UA 已应用"
-                }
+                recreateGeckoSession(saved)
+                val message = if (saved.isUsable()) "代理已保存；如未立即生效，请重启应用" else "代理已关闭，UA 已应用"
                 Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("取消", null)
             .show()
     }
 
-    private fun applyProxy(settings: HttpProxySettings): Boolean {
-        localProxyServer?.stop()
-        localProxyServer = null
-
-        if (!settings.isUsable()) {
-            return WebViewProxyApplier.apply(this, settings)
-        }
-
-        val started = LocalHttpProxyServer(LOCAL_PROXY_PORT, settings).also {
-            localProxyServer = it
-        }.start()
-        if (!started) return false
-
-        val localProxySettings = settings.copy(
-            host = LOCAL_PROXY_HOST,
-            port = LOCAL_PROXY_PORT,
-            username = "",
-            password = "",
-        )
-        return WebViewProxyApplier.apply(this, localProxySettings)
-    }
+    private fun dialogSettings(
+        enabled: CheckBox,
+        host: EditText,
+        port: EditText,
+        username: EditText,
+        password: EditText,
+        proxyDns: CheckBox,
+        userAgent: EditText,
+    ): HttpProxySettings = HttpProxySettings(
+        enabled = enabled.isChecked,
+        host = host.text.toString().trim(),
+        port = port.text.toString().toIntOrNull() ?: 0,
+        username = username.text.toString(),
+        password = password.text.toString(),
+        proxyDns = proxyDns.isChecked,
+        userAgent = UserAgentSettings.effective(userAgent.text.toString()),
+    )
 
     private fun clearCookies() {
-        CookieManager.getInstance().removeAllCookies {
-            CookieManager.getInstance().flush()
-            Toast.makeText(this, "Cookies 已清除", Toast.LENGTH_SHORT).show()
-        }
+        geckoRuntime.storageController.clearData(StorageController.ClearFlags.COOKIES).accept(
+            { Toast.makeText(this, "Cookies 已清除", Toast.LENGTH_SHORT).show() },
+            { Toast.makeText(this, "Cookies 清除失败", Toast.LENGTH_SHORT).show() },
+        )
     }
 
     private fun testHttpProxy(settings: HttpProxySettings) {
@@ -440,13 +418,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private companion object {
-        const val TAG = "TvBrowser"
         const val HOME_URL = "https://www.google.com"
         const val KODI_PACKAGE = "org.xbmc.kodi"
         const val LAN_INPUT_PORT = 8787
-        const val LOCAL_PROXY_HOST = "127.0.0.1"
-        const val LOCAL_PROXY_PORT = 8899
         const val QR_SIZE = 512
-        val VIDEO_EXTENSIONS = setOf("m3u8", "mp4", "webm", "mov", "flv", "ts", "m3u")
+        const val GECKO_CONFIG_FILE = "geckoview-config.yaml"
     }
 }

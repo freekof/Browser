@@ -43,6 +43,7 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.2.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.webkit:webkit:1.12.1")
+    implementation("org.mozilla.geckoview:geckoview:138.0.20250512124033")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.zxing:core:3.5.3")
 
